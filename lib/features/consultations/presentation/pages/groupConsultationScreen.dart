@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../../../../core/utils/doctor_image_utils.dart';
 
@@ -20,7 +21,6 @@ class GroupConsultationScreen extends StatefulWidget {
 }
 
 class _GroupConsultationScreenState extends State<GroupConsultationScreen> {
-  static const bool _preferInlineAttachments = false;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
@@ -33,7 +33,6 @@ class _GroupConsultationScreenState extends State<GroupConsultationScreen> {
   Set<String> _hiddenMessageIds = <String>{};
 
   List<PlatformFile> _selectedFiles = [];
-  bool _cloudStorageBlocked = false;
 
   @override
   void initState() {
@@ -352,7 +351,7 @@ class _GroupConsultationScreenState extends State<GroupConsultationScreen> {
       final List<Map<String, String>> files = [];
 
       for (final file in _selectedFiles) {
-        final uploadedFile = await _uploadGroupFileWithFallback(file);
+        final uploadedFile = await _uploadGroupFile(file);
         files.add(uploadedFile);
       }
 
@@ -378,7 +377,7 @@ class _GroupConsultationScreenState extends State<GroupConsultationScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('فشل إرسال الرسالة: $e'),
+            content: Text(_groupUploadErrorMessage(e)),
             backgroundColor: Colors.red,
           ),
         );
@@ -390,57 +389,74 @@ class _GroupConsultationScreenState extends State<GroupConsultationScreen> {
     }
   }
 
-  Future<Map<String, String>> _uploadGroupFileWithFallback(PlatformFile file) async {
+  Future<Map<String, String>> _uploadGroupFile(PlatformFile file) async {
     final ext = (file.extension ?? '').toLowerCase();
     final isImage = ext == 'jpg' || ext == 'jpeg' || ext == 'png' || ext == 'webp';
+    final bytes = await _readPlatformFileBytes(file);
 
-    if (file.bytes == null) {
-      throw Exception('الملف ${file.name} لا يحتوي بيانات');
+    if (bytes == null || bytes.isEmpty) {
+      throw Exception('empty_group_attachment');
     }
 
-    if (_preferInlineAttachments || _cloudStorageBlocked) {
-      return {
-        'fileType': isImage ? 'image_inline' : 'file_inline',
-        'fileBase64': base64Encode(file.bytes!),
-        'fileName': file.name,
-      };
+    final userSafeId = _auth.currentUser?.uid;
+    if (userSafeId == null) {
+      throw Exception('user_not_authenticated');
     }
 
-    try {
-      final userSafeId = _auth.currentUser?.uid ?? 'anonymous';
-      final safeName = _safeFileName(file.name);
-      final ref = _storage.ref().child(
-        'group_consultations/${userSafeId}/${DateTime.now().millisecondsSinceEpoch}_$safeName',
-      );
-      final uploadTask = ref.putData(
-        file.bytes!,
-        SettableMetadata(
-          contentType: _resolveContentType(ext, isImage),
-          customMetadata: {'originalName': file.name},
-        ),
-      );
-      final snapshot = await uploadTask;
-      final url = await snapshot.ref.getDownloadURL();
-      return {
-        'fileUrl': url,
-        'fileType': isImage ? 'image' : 'file',
-        'fileName': file.name,
-      };
-    } catch (e) {
-      final msg = e.toString().toLowerCase();
-      if (msg.contains('code\": 402') ||
-          msg.contains('httpresult: 402') ||
-          msg.contains('-13000') ||
-          msg.contains('spark pricing plan') ||
-          msg.contains('no longer supports')) {
-        _cloudStorageBlocked = true;
-      }
-      return {
-        'fileType': isImage ? 'image_inline' : 'file_inline',
-        'fileBase64': base64Encode(file.bytes!),
-        'fileName': file.name,
-      };
+    final safeName = _safeFileName(file.name);
+    final ref = _storage.ref().child(
+      'group_consultations/$userSafeId/${DateTime.now().millisecondsSinceEpoch}_$safeName',
+    );
+    final uploadTask = ref.putData(
+      bytes,
+      SettableMetadata(
+        contentType: _resolveContentType(ext, isImage),
+        customMetadata: {'originalName': file.name},
+      ),
+    );
+    final snapshot = await uploadTask;
+    final url = await snapshot.ref.getDownloadURL();
+
+    if (url.trim().isEmpty) {
+      throw Exception('empty_group_attachment_url');
     }
+
+    return {
+      'fileUrl': url,
+      'fileType': isImage ? 'image' : 'file',
+      'fileName': file.name,
+    };
+  }
+
+  Future<Uint8List?> _readPlatformFileBytes(PlatformFile file) async {
+    if (file.bytes != null && file.bytes!.isNotEmpty) return file.bytes;
+    final path = file.path;
+    if (path == null || path.isEmpty) return null;
+    final localFile = File(path);
+    if (!await localFile.exists()) return null;
+    return localFile.readAsBytes();
+  }
+
+  String _groupUploadErrorMessage(Object error) {
+    final message = error.toString().toLowerCase();
+    if (message.contains('app check') || message.contains('appcheck')) {
+      return 'تعذر رفع الملف بسبب إعدادات App Check في Firebase. لم يتم إرسال الرسالة.';
+    }
+    if (message.contains('code\": 402') ||
+        message.contains('httpresult: 402') ||
+        message.contains('-13000') ||
+        message.contains('spark pricing plan') ||
+        message.contains('no longer supports')) {
+      return 'تعذر رفع الملف بسبب قيود Firebase Storage الحالية. لم يتم إرسال الرسالة.';
+    }
+    if (message.contains('unable to resolve host') ||
+        message.contains('unknownhostexception') ||
+        message.contains('network') ||
+        message.contains('broken pipe') ||
+        message.contains('terminated the upload session')) {
+      return 'تعذر رفع الملف بسبب مشكلة في الاتصال. تحقق من الإنترنت ثم حاول مرة أخرى.';
+    }
+    return 'فشل رفع الملف. لم يتم إرسال الرسالة.';
   }
 
   Future<void> _pickFiles() async {
