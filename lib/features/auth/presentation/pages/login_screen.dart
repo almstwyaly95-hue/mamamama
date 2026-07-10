@@ -46,20 +46,23 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _passwordController.text.trim(),
       );
 
-      await userCredential.user!.reload();
-      final refreshedUser = FirebaseAuth.instance.currentUser;
-      if (refreshedUser?.emailVerified != true) {
-        await userCredential.user!.sendEmailVerification();
-        throw FirebaseAuthException(
-          code: 'email-not-verified',
-          message: 'يرجى تفعيل البريد الإلكتروني أولاً. تم إرسال رابط التفعيل مرة أخرى.',
-        );
+      final uid = userCredential.user!.uid;
+
+      // 🔹 حسابات الإدارة مستثناة بالكامل من تحقق البريد وتعتمد على الدور المخزن في Firestore.
+      final adminDoc = await FirebaseFirestore.instance
+          .collection('admins')
+          .doc(uid)
+          .get();
+      if (adminDoc.exists && (adminDoc.data()?['isActive'] ?? true) == true) {
+        if (!mounted) return;
+        Navigator.pushNamedAndRemoveUntil(context, '/admin', (route) => false);
+        return;
       }
 
-      // 🔹 جلب بيانات المستخدم من Firestore
+      // 🔹 جلب بيانات المستخدم من Firestore قبل فحص البريد لمعرفة هل أكمل أول تحقق سابقاً.
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
-          .doc(userCredential.user!.uid)
+          .doc(uid)
           .get();
 
       if (!userDoc.exists) {
@@ -69,7 +72,26 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
 
-      final userData = userDoc.data()!;
+      final existingUserData = userDoc.data()!;
+      final emailVerificationCompleted = existingUserData['emailVerificationCompleted'] == true;
+      if (!emailVerificationCompleted) {
+        await userCredential.user!.reload();
+        final refreshedUser = FirebaseAuth.instance.currentUser;
+        if (refreshedUser?.emailVerified != true) {
+          throw FirebaseAuthException(
+            code: 'email-not-verified',
+            message: 'يرجى تفعيل البريد الإلكتروني أولاً.',
+          );
+        }
+
+        await FirebaseFirestore.instance.collection('users').doc(uid).set({
+          'emailVerificationCompleted': true,
+          'emailVerifiedAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+
+      final userData = existingUserData;
       final accountType = userData['accountType'] as String? ?? 'patient';
       final isVerified = userData['isVerified'] as bool? ?? false;
       final hasLicenseDocuments = userData['hasLicenseDocuments'] as bool? ?? false;
@@ -140,7 +162,7 @@ class _LoginScreenState extends State<LoginScreen> {
       case 'network-request-failed':
         return 'فشل الاتصال بالخادم';
       case 'email-not-verified':
-        return 'يرجى تفعيل البريد الإلكتروني أولاً. تم إرسال رابط التفعيل مرة أخرى.';
+        return 'يرجى تفعيل البريد الإلكتروني أولاً. يمكنك إعادة إرسال الرابط من شاشة التحقق.';
       case 'unverified-doctor':
         return 'حساب الطبيب قيد المراجعة ولم يتم تفعيله بعد';
       default:
