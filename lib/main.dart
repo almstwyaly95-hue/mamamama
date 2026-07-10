@@ -28,6 +28,7 @@ import 'package:digl/services/enhanced_incoming_call_service.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -41,7 +42,6 @@ import 'package:timezone/timezone.dart' as tz;
 import 'Provider/auth_gate.dart';
 import 'core/config/medical_theme.dart';
 import 'core/config/theme_provider.dart';
-import 'features/admin/presentation/pages/admin_login_screen.dart';
 import 'features/ai_chat/presentation/pages/medical_ai_chat_screen.dart';
 import 'features/auth/presentation/pages/verification_pending_screen.dart';
 import 'features/doctor/presentation/pages/doctor_dashboard_screen.dart';
@@ -118,8 +118,8 @@ Future<void> main() async {
   await _ensureFirebaseInitialized();
 
   await FirebaseAppCheck.instance.activate(
-    androidProvider: AndroidProvider.debug,
-    appleProvider: AppleProvider.debug,
+    androidProvider: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+    appleProvider: kDebugMode ? AppleProvider.debug : AppleProvider.appAttest,
   );
 
 
@@ -215,8 +215,8 @@ class MyApp extends StatelessWidget {
 
           locale: const Locale('ar', 'SA'),
 
-          home: const AdminLoginScreen(),
-          //AuthGate AdminLoginScreen
+          home: const AuthGate(),
+          // AuthGate is the single entry point; admins are routed by role after login
           routes: {
             '/login': (_) => const LoginScreen(),
             '/register': (_) => const RegisterScreen(),

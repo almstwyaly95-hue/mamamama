@@ -49,7 +49,6 @@ class ConsultationScreen extends StatefulWidget {
 class _ConsultationScreenState extends State<ConsultationScreen> {
   // ✅ Logging Tag
   static const String _logTag = '💬 [Consultation Screen]';
-  static const bool _preferInlineAttachments = true;
 
   // Controllers
   final TextEditingController _messageController = TextEditingController();
@@ -89,7 +88,6 @@ class _ConsultationScreenState extends State<ConsultationScreen> {
   Duration _audioDuration = Duration.zero;
   Duration _audioPosition = Duration.zero;
   final Map<String, String> _inlineAudioFiles = {};
-  bool _cloudStorageBlocked = false;
 
   @override
   void initState() {
@@ -489,44 +487,15 @@ Future<DocumentSnapshot<Map<String, dynamic>>> _consultationDoc() =>
     }
 
     String? downloadUrl;
-    String? inlineAudioBase64;
-    String? inlineFileBase64;
     String type = 'text';
 
     try {
       if (selectedMedia != null && mediaType != null) {
         type = mediaType!;
-        final skipCloudUpload = _preferInlineAttachments || _cloudStorageBlocked;
-        downloadUrl = skipCloudUpload ? null : await _uploadFile();
+        downloadUrl = await _uploadFile();
 
-        final shouldUseInlineFallback = _preferInlineAttachments ||
-            _cloudStorageBlocked ||
-            downloadUrl == null ||
-            (_lastUploadError != null &&
-                _isStoragePlanRestricted(_lastUploadError!));
-
-        if (type == 'audio' && shouldUseInlineFallback) {
-          inlineAudioBase64 = await _encodeInlineAudio(selectedMedia!);
-          if (inlineAudioBase64.isEmpty) {
-            throw Exception('inline_audio_encoding_failed');
-          }
-          type = 'audio_inline';
-          downloadUrl = null;
-        } else if (type != 'audio' && shouldUseInlineFallback) {
-          inlineFileBase64 = await _encodeInlineFile(selectedMedia!);
-          if (inlineFileBase64.isEmpty) {
-            throw Exception('inline_file_encoding_failed');
-          }
-          type = '${type}_inline';
-          downloadUrl = null;
-        }
-
-        if (downloadUrl == null && inlineAudioBase64 == null && inlineFileBase64 == null) {
-          throw Exception('failed_to_upload_and_inline_fallback');
-        } else {
-          if (downloadUrl == null && _lastUploadError != null && mounted) {
-            _showErrorSnackbar('تعذر الرفع للسحابة، تم الإرسال كمرفق داخل الرسالة');
-          }
+        if (downloadUrl == null || downloadUrl.trim().isEmpty) {
+          throw Exception('attachment_upload_failed');
         }
       }
 
@@ -540,8 +509,8 @@ Future<DocumentSnapshot<Map<String, dynamic>>> _consultationDoc() =>
         'senderImage': getUserImageUrl(widget.isDoctor ? doctorData : patientData),
         'text': _messageController.text.trim(),
         'fileUrl': downloadUrl,
-        'audioBase64': inlineAudioBase64,
-        'fileBase64': inlineFileBase64,
+        'audioBase64': null,
+        'fileBase64': null,
         'fileName': fileName,
         'type': type,
         'timestamp': FieldValue.serverTimestamp(),
@@ -569,8 +538,9 @@ Future<DocumentSnapshot<Map<String, dynamic>>> _consultationDoc() =>
       await Future.delayed(const Duration(milliseconds: 200));
       await _scrollToBottom();
     } catch (e) {
-      setState(() => isSending = false);
-      _showErrorSnackbar('فشل في إرسال الرسالة');
+      _logError('فشل إرسال الرسالة: $e');
+      if (mounted) setState(() => isSending = false);
+      _showErrorSnackbar(_attachmentUploadErrorMessage(_lastUploadError ?? e));
     }
   }
 
@@ -716,14 +686,22 @@ Future<DocumentSnapshot<Map<String, dynamic>>> _consultationDoc() =>
 
   Object? _lastUploadError;
 
-  Future<String> _encodeInlineAudio(File audioFile) async {
-    final bytes = await audioFile.readAsBytes();
-    return base64Encode(bytes);
-  }
-
-  Future<String> _encodeInlineFile(File file) async {
-    final bytes = await file.readAsBytes();
-    return base64Encode(bytes);
+  String _attachmentUploadErrorMessage(Object error) {
+    final message = error.toString().toLowerCase();
+    if (message.contains('app check') || message.contains('appcheck')) {
+      return 'تعذر رفع الملف بسبب إعدادات App Check في Firebase. يرجى المحاولة لاحقاً أو التواصل مع الدعم.';
+    }
+    if (_isStoragePlanRestricted(error)) {
+      return 'تعذر رفع الملف بسبب قيود Firebase Storage الحالية. لم يتم إرسال الرسالة.';
+    }
+    if (message.contains('unable to resolve host') ||
+        message.contains('unknownhostexception') ||
+        message.contains('network') ||
+        message.contains('broken pipe') ||
+        message.contains('terminated the upload session')) {
+      return 'تعذر رفع الملف بسبب مشكلة في الاتصال. تحقق من الإنترنت ثم حاول مرة أخرى.';
+    }
+    return 'فشل رفع الملف. لم يتم إرسال الرسالة.';
   }
 
   Future<String> _createInlineAudioFile({
@@ -833,8 +811,6 @@ Future<DocumentSnapshot<Map<String, dynamic>>> _consultationDoc() =>
   }
 
   Future<String?> _uploadFile() async {
-    if (_cloudStorageBlocked) return null;
-
     setState(() {
       _isUploading = true;
       _uploadProgress = 0.0;
@@ -870,9 +846,6 @@ Future<DocumentSnapshot<Map<String, dynamic>>> _consultationDoc() =>
       return downloadUrl;
     } catch (e) {
       _lastUploadError = e;
-      if (_isStoragePlanRestricted(e)) {
-        _cloudStorageBlocked = true;
-      }
       _logError('فشل رفع الملف: $e');
       if (mounted) {
         setState(() {
@@ -2172,7 +2145,7 @@ Future<DocumentSnapshot<Map<String, dynamic>>> _consultationDoc() =>
     required double size,
     Color fallbackIconColor = Colors.blue,
   }) {
-    if (imageUrl == null || imageUrl.isEmpty || _cloudStorageBlocked) {
+    if (imageUrl == null || imageUrl.isEmpty) {
       return _buildAvatarFallback(size: size, iconColor: fallbackIconColor);
     }
 
