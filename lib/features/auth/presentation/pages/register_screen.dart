@@ -620,6 +620,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'gender': _selectedGender,
         'accountType': _selectedAccountType,
         'isVerified': isVerified,
+        'emailVerificationCompleted': false,
+        'emailVerificationSentAt': FieldValue.serverTimestamp(),
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
         'photoURL': _photoURL,
@@ -873,6 +875,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         licenseDocumentBase64: licenseDocumentBase64,
       );
 
+      await FirebaseAuth.instance.setLanguageCode('ar');
       await userCredential.user!.sendEmailVerification();
 
       if (!mounted) return;
@@ -915,6 +918,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final refreshedUser = FirebaseAuth.instance.currentUser;
 
       if (refreshedUser?.emailVerified == true) {
+        await FirebaseFirestore.instance.collection('users').doc(refreshedUser!.uid).set({
+          'emailVerificationCompleted': true,
+          'emailVerifiedAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
         if (!mounted) return;
         Navigator.pushNamedAndRemoveUntil(
           context,

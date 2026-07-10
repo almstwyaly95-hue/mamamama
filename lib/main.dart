@@ -41,7 +41,6 @@ import 'package:timezone/timezone.dart' as tz;
 import 'Provider/auth_gate.dart';
 import 'core/config/medical_theme.dart';
 import 'core/config/theme_provider.dart';
-import 'features/admin/presentation/pages/admin_login_screen.dart';
 import 'features/ai_chat/presentation/pages/medical_ai_chat_screen.dart';
 import 'features/auth/presentation/pages/verification_pending_screen.dart';
 import 'features/doctor/presentation/pages/doctor_dashboard_screen.dart';
@@ -215,8 +214,8 @@ class MyApp extends StatelessWidget {
 
           locale: const Locale('ar', 'SA'),
 
-          home: const AdminLoginScreen(),
-          //AuthGate AdminLoginScreen
+          home: const AuthGate(),
+          // AuthGate is the single entry point; admins are routed by role after login
           routes: {
             '/login': (_) => const LoginScreen(),
             '/register': (_) => const RegisterScreen(),

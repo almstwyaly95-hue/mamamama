@@ -152,7 +152,7 @@ class _GroupConsultationScreenState extends State<GroupConsultationScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: isImage
-                    ? Image.memory(file.bytes!, fit: BoxFit.cover)
+                    ? (file.bytes != null ? Image.memory(file.bytes!, fit: BoxFit.cover) : const Center(child: Icon(Icons.image)))
                     : Center(child: Icon(Icons.insert_drive_file, size: 40)),
               ),
               Positioned(
@@ -235,14 +235,15 @@ class _GroupConsultationScreenState extends State<GroupConsultationScreen> {
                       padding: const EdgeInsets.only(bottom: 8.0),
                       child: isImage
                           ? GestureDetector(
-                        onTap: fileUrl.isNotEmpty
-                            ? () => Navigator.push(
+                        onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => ImagePreviewScreen(imageUrl: fileUrl),
+                            builder: (_) => ImagePreviewScreen(
+                              imageUrl: fileUrl,
+                              imageBase64: fileBase64,
+                            ),
                           ),
-                        )
-                            : null,
+                        ),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: fileUrl.isNotEmpty
@@ -346,6 +347,7 @@ class _GroupConsultationScreenState extends State<GroupConsultationScreen> {
       final userData = await _firestore.collection("users").doc(user.uid).get();
       final fullName = userData.data()?['fullName'] ?? 'مستخدم';
       final photoURL = userData.data()?['photoURL'];
+      final gender = userData.data()?['gender'];
 
       final List<Map<String, String>> files = [];
 
@@ -359,6 +361,7 @@ class _GroupConsultationScreenState extends State<GroupConsultationScreen> {
         'senderId': user.uid,
         'senderName': fullName,
         'senderImage': photoURL,
+        'senderGender': gender,
         'timestamp': FieldValue.serverTimestamp(),
         'files': files,
         'replyTo': _replyToMessage,
@@ -404,11 +407,20 @@ class _GroupConsultationScreenState extends State<GroupConsultationScreen> {
     }
 
     try {
+      final userSafeId = _auth.currentUser?.uid ?? 'anonymous';
+      final safeName = _safeFileName(file.name);
       final ref = _storage.ref().child(
-        'group_files/${DateTime.now().millisecondsSinceEpoch}_${file.name}',
+        'group_consultations/${userSafeId}/${DateTime.now().millisecondsSinceEpoch}_$safeName',
       );
-      await ref.putData(file.bytes!, SettableMetadata(contentType: _resolveContentType(ext, isImage)));
-      final url = await ref.getDownloadURL();
+      final uploadTask = ref.putData(
+        file.bytes!,
+        SettableMetadata(
+          contentType: _resolveContentType(ext, isImage),
+          customMetadata: {'originalName': file.name},
+        ),
+      );
+      final snapshot = await uploadTask;
+      final url = await snapshot.ref.getDownloadURL();
       return {
         'fileUrl': url,
         'fileType': isImage ? 'image' : 'file',
@@ -575,7 +587,8 @@ class _GroupConsultationScreenState extends State<GroupConsultationScreen> {
 
 class ImagePreviewScreen extends StatelessWidget {
   final String imageUrl;
-  const ImagePreviewScreen({super.key, required this.imageUrl});
+  final String imageBase64;
+  const ImagePreviewScreen({super.key, required this.imageUrl, this.imageBase64 = ''});
 
   @override
   Widget build(BuildContext context) {
@@ -587,7 +600,7 @@ class ImagePreviewScreen extends StatelessWidget {
       ),
       body: Center(
         child: InteractiveViewer(
-          child: Image.network(imageUrl),
+          child: imageUrl.trim().isNotEmpty ? Image.network(imageUrl) : Image.memory(base64Decode(imageBase64)),
         ),
       ),
     );

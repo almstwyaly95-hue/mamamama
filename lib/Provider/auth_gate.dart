@@ -1,105 +1,10 @@
-// import 'package:cloud_firestore/cloud_firestore.dart';
-// import 'package:digl/Provider/underReviewScreen.dart';
-// import 'package:digl/features/auth/presentation/pages/login_screen.dart';
-// import 'package:digl/features/home/presentation/pages/home_screen.dart';
-// import 'package:firebase_auth/firebase_auth.dart';
-// import 'package:flutter/material.dart';
-// import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
-// import 'package:zego_uikit_signaling_plugin/zego_uikit_signaling_plugin.dart';
-//
-// /// 🔁 نستخدم هذا المتغير لمنع التهيئة المتكررة لـ Zego
-// bool _zegoInitialized = false;
-//
-// /// ✅ دالة تهيئة Zego لمرة واحدة فقط
-// Future<void> initZegoIfNeeded({
-//   required String userID,
-//   required String userName,
-// }) async {
-//   if (_zegoInitialized) return;
-//   _zegoInitialized = true;
-//
-//   ZegoUIKitPrebuiltCallInvitationService().init(
-//     appID: 472822999, // App ID من ZegoCloud
-//     appSign:
-//     'ce9c9c64bb1ec7a06fcdb15e4fe94fa6e4ff221b9630569c3e362913ce9d0286', // App Sign من ZegoCloud
-//     userID: userID,
-//     userName: userName,
-//     plugins: [ZegoUIKitSignalingPlugin()],
-//   );
-// }
-//
-// class AuthGate extends StatelessWidget {
-//   const AuthGate({super.key});
-//
-//   @override
-//   Widget build(BuildContext context) {
-//     return StreamBuilder<User?>(
-//       stream: FirebaseAuth.instance.authStateChanges(),
-//       builder: (context, snapshot) {
-//         if (snapshot.hasError) {
-//           return const Scaffold(
-//             body: Center(
-//               child: Text('حدث خطأ ما. حاول مرة أخرى.',
-//                   style: TextStyle(color: Colors.red)),
-//             ),
-//           );
-//         }
-//
-//         if (snapshot.connectionState == ConnectionState.waiting) {
-//           return const Scaffold(
-//               body: Center(child: CircularProgressIndicator()));
-//         }
-//
-//         final user = snapshot.data;
-//         if (user == null) return const LoginScreen();
-//
-//         return FutureBuilder<DocumentSnapshot>(
-//           future: FirebaseFirestore.instance
-//               .collection('users')
-//               .doc(user.uid)
-//               .get(),
-//           builder: (context, userSnapshot) {
-//             if (userSnapshot.connectionState == ConnectionState.waiting) {
-//               return const Scaffold(
-//                   body: Center(child: CircularProgressIndicator()));
-//             }
-//
-//             if (userSnapshot.hasError ||
-//                 !userSnapshot.hasData ||
-//                 !userSnapshot.data!.exists) {
-//               return const LoginScreen();
-//             }
-//
-//             final userData =
-//             userSnapshot.data!.data() as Map<String, dynamic>;
-//             final accountType = userData['accountType'] ?? 'patient';
-//             final userName =
-//                 userData['fullName'] ?? 'User_${user.uid.substring(0, 5)}';
-//
-//             /// ✅ تهيئة Zego لمرة واحدة
-//             initZegoIfNeeded(userID: user.uid, userName: userName);
-//
-//             if (accountType == 'doctor') {
-//               final isVerified = userData['isVerified'] == true;
-//               final hasLicense = userData['hasLicenseDocuments'] == true;
-//
-//               if (!isVerified || !hasLicense) {
-//                 return const UnderReviewScreen(); // طبيب غير موثق
-//               }
-//
-//               return const HomeScreen(); // طبيب موثق
-//             }
-//
-//             return const HomeScreen(); // مريض
-//           },
-//         );
-//       },
-//     );
-//   }
-// }
 import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:digl/Provider/underReviewScreen.dart';
+import 'package:digl/features/admin/models/admin_models.dart';
+import 'package:digl/features/admin/presentation/pages/admin_dashboard_screen.dart';
 import 'package:digl/features/auth/presentation/pages/login_screen.dart';
 import 'package:digl/features/home/presentation/pages/home_screen.dart';
 import 'package:digl/features/medical_profile/presentation/pages/health_questions_screen.dart';
@@ -108,56 +13,30 @@ import 'package:digl/services/zego_call_service.dart';
 import 'package:digl/services/zego_incoming_call_handler.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
-import 'package:zego_uikit_signaling_plugin/zego_uikit_signaling_plugin.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
+
 import '../services/connectivity_service.dart';
 
-/// ✅ تهيئة Zego عند الحاجة
-/// هذه الدالة تقوم بـ:
-/// 1. تهيئة خدمة المكالمات من Zego
-/// 2. تهيئة معالج المكالمات الواردة
-/// 3. التحقق من الاتصال بالإنترنت
 Future<void> initZegoIfNeeded({
   required String userID,
   required String userName,
 }) async {
-  // ✅ تخطي إذا كانت Zego مهيأة بالفعل
-  if (ZegoCallService.isInitialized) {
-    print('✅ Zego مهيأ بالفعل');
-    return;
-  }
+  if (ZegoCallService.isInitialized) return;
 
-  // ✅ التحقق من الاتصال بالإنترنت
   final isConnected = await ConnectivityService.isConnected();
-  if (!isConnected) {
-    print('⚠️ لا يوجد اتصال - تخطي تهيئة Zego');
-    return;
-  }
+  if (!isConnected) return;
 
-  print('🔄 جاري تهيئة Zego لـ $userID...');
-
-  // ✅ تهيئة Zego باستخدام الخدمة المحسّنة
   final initialized = await ZegoCallService.initialize(
     userID: userID,
     userName: userName,
   );
 
   if (initialized) {
-    print('✅ تم تهيئة خدمة Zego بنجاح');
-
-    // ✅ تهيئة معالج المكالمات الواردة
     try {
       await ZegoIncomingCallHandler.initialize();
-      print('✅ تم تهيئة معالج المكالمات الواردة');
     } catch (e) {
-      print('⚠️ تحذير: فشل تهيئة معالج المكالمات: $e');
+      debugPrint('⚠️ تحذير: فشل تهيئة معالج المكالمات: $e');
     }
-
-    // ⏱️ انتظر قليلاً لضمان الاتصال الكامل
     await Future.delayed(const Duration(seconds: 1));
-  } else {
-    print('⚠️ تحذير: فشل تهيئة خدمة Zego (قد تعمل بدونها)');
   }
 }
 
@@ -181,55 +60,46 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   void dispose() {
-    _connectivitySubscription.cancel(); // تأكد من إلغاء الاشتراك:cite[4]
+    _connectivitySubscription.cancel();
     super.dispose();
   }
 
   Future<void> _checkInitialConnection() async {
     final connected = await ConnectivityService.isConnected();
-    if (mounted) {
-      setState(() => _isConnected = connected);
-    }
+    if (mounted) setState(() => _isConnected = connected);
   }
 
   void _setupConnectivityListener() {
-    _connectivitySubscription =
-        Connectivity().onConnectivityChanged.listen(
-              (ConnectivityResult result) {
-            final connected = result != ConnectivityResult.none;
-
-            if (!mounted) return;
-
-            setState(() => _isConnected = connected);
-
-            if (!connected) {
-              ConnectivityService.showNoInternetSnackBar(context);
-            } else {
-              ScaffoldMessenger.of(context).hideCurrentSnackBar();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Row(
-                    children: [
-                      Icon(Icons.wifi, color: Colors.white),
-                      SizedBox(width: 8),
-                      Text('تم استعادة الاتصال بالإنترنت'),
-                    ],
-                  ),
-                  backgroundColor: Colors.green,
-                  duration: Duration(seconds: 2),
-                ),
-              );
-            }
-          },
-        );
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen(
+      (ConnectivityResult result) {
+        final connected = result != ConnectivityResult.none;
+        if (!mounted) return;
+        setState(() => _isConnected = connected);
+        if (!connected) {
+          ConnectivityService.showNoInternetSnackBar(context);
+        } else {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.wifi, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text('تم استعادة الاتصال بالإنترنت'),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      },
+    );
   }
-
 
   @override
   Widget build(BuildContext context) {
-    if (!_isConnected) {
-      return _buildNoInternetScreen();
-    }
+    if (!_isConnected) return _buildNoInternetScreen();
     return _buildAuthContent();
   }
 
@@ -243,24 +113,11 @@ class _AuthGateState extends State<AuthGate> {
             children: [
               Icon(Icons.wifi_off, size: 80, color: Colors.grey[400]),
               const SizedBox(height: 24),
-              const Text(
-                'غير متصل بالإنترنت',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
+              const Text('غير متصل بالإنترنت', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
               const SizedBox(height: 16),
-              const Text(
-                'يجب أن يكون جهازك متصلاً بالإنترنت لاستخدام التطبيق.\n'
-                    'يرجى التحقق من اتصال Wi-Fi أو بيانات الجوال.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.grey),
-              ),
+              const Text('يجب أن يكون جهازك متصلاً بالإنترنت لاستخدام التطبيق.\nيرجى التحقق من اتصال Wi-Fi أو بيانات الجوال.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey)),
               const SizedBox(height: 32),
-              ElevatedButton.icon(
-                onPressed: _checkInitialConnection,
-                icon: const Icon(Icons.refresh),
-                label: const Text('إعادة المحاولة'),
-              ),
+              ElevatedButton.icon(onPressed: _checkInitialConnection, icon: const Icon(Icons.refresh), label: const Text('إعادة المحاولة')),
             ],
           ),
         ),
@@ -278,69 +135,92 @@ class _AuthGateState extends State<AuthGate> {
         final user = snapshot.data;
         if (user == null) return const LoginScreen();
 
-        return FutureBuilder<User>(
-          future: _reloadUser(user),
-          builder: (context, verifySnapshot) {
-            if (verifySnapshot.connectionState == ConnectionState.waiting) return _buildLoadingScreen();
-            final refreshedUser = verifySnapshot.data ?? FirebaseAuth.instance.currentUser ?? user;
-            if (!refreshedUser.emailVerified) return _buildEmailNotVerifiedScreen(refreshedUser);
+        return FutureBuilder<_ResolvedAccount>(
+          future: _resolveAccount(user),
+          builder: (context, accountSnapshot) {
+            if (accountSnapshot.connectionState == ConnectionState.waiting) return _buildLoadingScreen();
+            if (accountSnapshot.hasError || !accountSnapshot.hasData) return const LoginScreen();
 
-            return FutureBuilder<DocumentSnapshot>(
-          future: FirebaseFirestore.instance.collection('users').doc(user.uid).get(),
-          builder: (context, userSnapshot) {
-            if (userSnapshot.connectionState == ConnectionState.waiting) return _buildLoadingScreen();
-            if (userSnapshot.hasError || !userSnapshot.hasData || !userSnapshot.data!.exists) {
-              return const LoginScreen();
+            final account = accountSnapshot.data!;
+            if (account.isAdmin) return AdminDashboardScreen(admin: account.adminUser!);
+
+            final refreshedUser = FirebaseAuth.instance.currentUser ?? user;
+            if (!account.emailVerificationCompleted && !refreshedUser.emailVerified) {
+              return _buildEmailNotVerifiedScreen(refreshedUser);
             }
 
-            final userData = userSnapshot.data!.data() as Map<String, dynamic>;
-            final accountType = userData['accountType'] ?? 'patient';
-            final userName = userData['fullName'] ?? 'User_${user.uid.substring(0, 5)}';
-
-            if (_isConnected) {
-              initZegoIfNeeded(userID: user.uid, userName: userName);
-            }
-
-            if (accountType == 'doctor') {
-              final isVerified = userData['isVerified'] == true;
-              final hasLicense = userData['hasLicenseDocuments'] == true;
-              if (!isVerified || !hasLicense) return const UnderReviewScreen();
-              return const HomeScreen();
-            }
-
-            // للمريض: التحقق من وجود الملف الصحي فقط
-            // ملاحظة: أسئلة الذكاء الاصطناعي أصبحت متاحة يدويًا من شاشة الإعدادات.
-            if (accountType == 'patient') {
-              return FutureBuilder<bool>(
-                future: MedicalProfileService.hasHealthProfile(),
-                builder: (context, profileSnapshot) {
-                  if (profileSnapshot.connectionState == ConnectionState.waiting) {
-                    return _buildLoadingScreen();
-                  }
-                  if (profileSnapshot.hasError) {
-                    return _buildErrorScreen('حدث خطأ أثناء التحقق من الملف الصحي.');
-                  }
-                  final hasProfile = profileSnapshot.data ?? false;
-                  if (!hasProfile) {
-                    return const HealthQuestionsScreen();
-                  }
-                  return const HomeScreen();
+            if (!account.emailVerificationCompleted && refreshedUser.emailVerified) {
+              return FutureBuilder<void>(
+                future: _markEmailVerificationCompleted(refreshedUser.uid),
+                builder: (context, markSnapshot) {
+                  if (markSnapshot.connectionState == ConnectionState.waiting) return _buildLoadingScreen();
+                  return _buildUserHome(refreshedUser, account.userData!);
                 },
               );
             }
 
-            return const HomeScreen();
-          },
-            );
+            return _buildUserHome(refreshedUser, account.userData!);
           },
         );
       },
     );
   }
 
-  Future<User> _reloadUser(User user) async {
-    await user.reload();
-    return FirebaseAuth.instance.currentUser ?? user;
+  Future<_ResolvedAccount> _resolveAccount(User user) async {
+    final adminDoc = await FirebaseFirestore.instance.collection('admins').doc(user.uid).get();
+    if (adminDoc.exists && (adminDoc.data()?['isActive'] ?? true) == true) {
+      return _ResolvedAccount.admin(AdminUser.fromFirestore(adminDoc));
+    }
+
+    final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    if (!userDoc.exists) throw Exception('user-not-found');
+
+    final userData = userDoc.data() as Map<String, dynamic>;
+    final emailVerificationCompleted = userData['emailVerificationCompleted'] == true;
+    if (!emailVerificationCompleted) {
+      await user.reload();
+    }
+    return _ResolvedAccount.user(
+      userData,
+      emailVerificationCompleted: emailVerificationCompleted,
+    );
+  }
+
+  Future<void> _markEmailVerificationCompleted(String uid) async {
+    await FirebaseFirestore.instance.collection('users').doc(uid).set({
+      'emailVerificationCompleted': true,
+      'emailVerifiedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Widget _buildUserHome(User user, Map<String, dynamic> userData) {
+    final accountType = userData['accountType'] ?? 'patient';
+    final userName = userData['fullName'] ?? 'User_${user.uid.substring(0, 5)}';
+
+    if (_isConnected) initZegoIfNeeded(userID: user.uid, userName: userName);
+
+    if (accountType == 'doctor') {
+      final isVerified = userData['isVerified'] == true;
+      final hasLicense = userData['hasLicenseDocuments'] == true;
+      if (!isVerified || !hasLicense) return const UnderReviewScreen();
+      return const HomeScreen();
+    }
+
+    if (accountType == 'patient') {
+      return FutureBuilder<bool>(
+        future: MedicalProfileService.hasHealthProfile(),
+        builder: (context, profileSnapshot) {
+          if (profileSnapshot.connectionState == ConnectionState.waiting) return _buildLoadingScreen();
+          if (profileSnapshot.hasError) return _buildErrorScreen('حدث خطأ أثناء التحقق من الملف الصحي.');
+          final hasProfile = profileSnapshot.data ?? false;
+          if (!hasProfile) return const HealthQuestionsScreen();
+          return const HomeScreen();
+        },
+      );
+    }
+
+    return const HomeScreen();
   }
 
   Widget _buildEmailNotVerifiedScreen(User user) {
@@ -375,10 +255,7 @@ class _AuthGateState extends State<AuthGate> {
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('إعادة إرسال رابط التفعيل'),
               ),
-              TextButton(
-                onPressed: () => FirebaseAuth.instance.signOut(),
-                child: const Text('تسجيل الخروج'),
-              ),
+              TextButton(onPressed: () => FirebaseAuth.instance.signOut(), child: const Text('تسجيل الخروج')),
             ],
           ),
         ),
@@ -386,17 +263,12 @@ class _AuthGateState extends State<AuthGate> {
     );
   }
 
-
   Widget _buildLoadingScreen() {
     return const Scaffold(
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text('جاري التحميل...'),
-          ],
+          children: [CircularProgressIndicator(), SizedBox(height: 16), Text('جاري التحميل...')],
         ),
       ),
     );
@@ -413,9 +285,7 @@ class _AuthGateState extends State<AuthGate> {
             Text(message, textAlign: TextAlign.center),
             const SizedBox(height: 16),
             ElevatedButton(
-              onPressed: () => Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (context) => const AuthGate()),
-              ),
+              onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => const AuthGate())),
               child: const Text('إعادة المحاولة'),
             ),
           ],
@@ -423,4 +293,30 @@ class _AuthGateState extends State<AuthGate> {
       ),
     );
   }
+}
+
+class _ResolvedAccount {
+  final bool isAdmin;
+  final AdminUser? adminUser;
+  final Map<String, dynamic>? userData;
+  final bool emailVerificationCompleted;
+
+  const _ResolvedAccount._({
+    required this.isAdmin,
+    this.adminUser,
+    this.userData,
+    this.emailVerificationCompleted = false,
+  });
+
+  factory _ResolvedAccount.admin(AdminUser adminUser) => _ResolvedAccount._(
+        isAdmin: true,
+        adminUser: adminUser,
+        emailVerificationCompleted: true,
+      );
+
+  factory _ResolvedAccount.user(Map<String, dynamic> userData, {required bool emailVerificationCompleted}) => _ResolvedAccount._(
+        isAdmin: false,
+        userData: userData,
+        emailVerificationCompleted: emailVerificationCompleted,
+      );
 }

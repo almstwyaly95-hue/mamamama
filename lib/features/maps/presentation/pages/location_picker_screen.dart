@@ -29,7 +29,7 @@ class LocationPickerScreen extends StatefulWidget {
 }
 
 class _LocationPickerScreenState extends State<LocationPickerScreen> {
-  static const _fallback = LatLng(24.7136, 46.6753);
+  static const _fallback = LatLng(15.3694, 44.1910);
   late LatLng _selectedLatLng;
   late final TextEditingController _addressController;
 
@@ -84,7 +84,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
         children: [
           Expanded(
             child: GoogleMap(
-              initialCameraPosition: CameraPosition(target: _selectedLatLng, zoom: 14),
+              initialCameraPosition: CameraPosition(target: _selectedLatLng, zoom: widget.initialLocation == null ? 12 : 14),
               markers: {
                 Marker(markerId: const MarkerId('doctor_location'), position: _selectedLatLng),
               },
